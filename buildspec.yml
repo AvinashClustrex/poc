@@ -1,0 +1,56 @@
+version: 0.2
+
+env:
+  variables:
+    AWS_DEFAULT_REGION: ap-southeast-1       # change to your region
+    AWS_ACCOUNT_ID: "123456789012"           # change to your AWS account ID
+    ECR_REPO_NAME: hello-world-api           # change to your ECR repo name
+    CONTAINER_NAME: hello-world-container    # must match name in ECS Task Definition
+
+phases:
+  pre_build:
+    commands:
+      # Capture the Git commit SHA provided by CodeBuild
+      - COMMIT_SHA=${CODEBUILD_RESOLVED_SOURCE_VERSION}
+      - SHORT_SHA=$(echo $COMMIT_SHA | cut -c1-8)
+      - echo "Building commit $COMMIT_SHA (short $SHORT_SHA)"
+
+      # Authenticate Docker client to ECR
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION |
+          docker login --username AWS --password-stdin
+          $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+
+      # Full image URI tagged with commit SHA (immutable, traceable)
+      - IMAGE_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_REPO_NAME:$COMMIT_SHA
+      - LATEST_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_REPO_NAME:latest
+
+  build:
+    commands:
+      # Build Docker image — inject commit SHA as build arg
+      # This gets baked into the image as ENV GIT_COMMIT_SHA
+      - echo "Building Docker image..."
+      - docker build
+          --build-arg GIT_COMMIT_SHA=$COMMIT_SHA
+          --tag $IMAGE_URI
+          --tag $LATEST_URI
+          .
+
+  post_build:
+    commands:
+      # Push both the commit-SHA tag and latest to ECR
+      - echo "Pushing image to ECR..."
+      - docker push $IMAGE_URI
+      - docker push $LATEST_URI
+      - echo "Image pushed successfully - $IMAGE_URI"
+
+      # Write imagedefinitions.json
+      # CodePipeline ECS deploy action reads this file to know:
+      #   - which container in the Task Definition to update (CONTAINER_NAME)
+      #   - which ECR image URI to deploy (IMAGE_URI)
+      - printf '[{"name":"%s","imageUri":"%s"}]' $CONTAINER_NAME $IMAGE_URI > imagedefinitions.json
+      - echo "imagedefinitions.json contents:"
+      - cat imagedefinitions.json
+
+artifacts:
+  files:
+    - imagedefinitions.json
