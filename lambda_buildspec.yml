@@ -1,0 +1,67 @@
+version: 0.2
+
+env:
+  variables:
+    LAMBDA_FUNCTION_NAME: ci-cd-poc-lambda
+    AWS_DEFAULT_REGION: us-east-1
+    AWS_ACCOUNT_ID: "851725206270"
+
+phases:
+  pre_build:
+    commands:
+      - COMMIT_SHA=${CODEBUILD_RESOLVED_SOURCE_VERSION}
+      - SHORT_SHA=$(echo $COMMIT_SHA | cut -c1-8)
+      - echo "Building commit $COMMIT_SHA (short $SHORT_SHA)"
+
+  build:
+    commands:
+      - echo "Zipping Lambda function code..."
+
+      # Install dependencies into a package directory
+      - pip install -r requirements.txt -t package/ --no-cache-dir
+
+      # Copy function code into package directory
+      - cp lambda_function.py package/
+
+      # Create the ZIP
+      - cd package && zip -r ../lambda.zip . && cd ..
+
+      - echo "ZIP created successfully"
+      - ls -lh lambda.zip
+
+  post_build:
+    commands:
+      - echo "Updating Lambda function code..."
+      - aws lambda update-function-code
+          --function-name $LAMBDA_FUNCTION_NAME
+          --zip-file fileb://lambda.zip
+          --region $AWS_DEFAULT_REGION
+
+      - aws lambda wait function-updated
+          --function-name $LAMBDA_FUNCTION_NAME
+          --region $AWS_DEFAULT_REGION
+
+      - echo "Setting GIT_COMMIT_SHA env var on Lambda..."
+      - aws lambda update-function-configuration
+          --function-name $LAMBDA_FUNCTION_NAME
+          --environment "Variables={GIT_COMMIT_SHA=$COMMIT_SHA}"
+          --region $AWS_DEFAULT_REGION
+
+      - aws lambda wait function-updated
+          --function-name $LAMBDA_FUNCTION_NAME
+          --region $AWS_DEFAULT_REGION
+
+      # Publish a new version — snapshot of current code + config
+      - echo "Publishing new Lambda version..."
+      - VERSION=$(aws lambda publish-version
+          --function-name $LAMBDA_FUNCTION_NAME
+          --description "Commit $COMMIT_SHA"
+          --region $AWS_DEFAULT_REGION
+          --query 'Version'
+          --output text)
+
+      - echo "Published version $VERSION for commit $COMMIT_SHA"
+
+artifacts:
+  files:
+    - lambda.zip
