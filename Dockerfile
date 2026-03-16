@@ -47,11 +47,6 @@ USER appuser
 # ECS will map this port via the Task Definition portMappings
 EXPOSE 8000
 
-# Health check — Docker-level check (separate from ECS/ALB health check)
-# ECS uses the /health endpoint configured in the Task Definition or Target Group
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
-
 # Start the API server
 # - host 0.0.0.0 required so ECS can route traffic to the container
 # - workers=1 is correct for Fargate (scale via ECS service desired count, not workers)
