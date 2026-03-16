@@ -1,14 +1,14 @@
 {
-  "family": "hello-world-api",
+  "family": "ci-cd-poc",
   "networkMode": "awsvpc",
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "256",
   "memory": "512",
-  "executionRoleArn": "arn:aws:iam::123456789012:role/ecsTaskExecutionRole",
+  "executionRoleArn": "arn:aws:iam::851725206270:role/ecsTaskExecutionRole",
   "containerDefinitions": [
     {
-      "name": "hello-world-container",
-      "image": "123456789012.dkr.ecr.ap-southeast-1.amazonaws.com/hello-world-api:latest",
+      "name": "ci-cd-poc-container",
+      "image": "851725206270.dkr.ecr.us-east-1.amazonaws.com/ci-cd-poc:latest",
       "essential": true,
       "portMappings": [
         {
@@ -36,8 +36,8 @@
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
-          "awslogs-group": "/ecs/hello-world-api",
-          "awslogs-region": "ap-southeast-1",
+          "awslogs-group": "/ecs/ci-cd-poc",
+          "awslogs-region": "us-east-1",
           "awslogs-stream-prefix": "ecs"
         }
       }
