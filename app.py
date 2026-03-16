@@ -6,6 +6,7 @@ app = FastAPI(title="Hello World API", version="1.0.0")
 
 # Injected at Docker build time via ARG → ENV in Dockerfile
 GIT_COMMIT_SHA = os.environ.get("GIT_COMMIT_SHA", "unknown")
+print(f"Git commit SHA: {GIT_COMMIT_SHA}")
 APP_ENV = os.environ.get("APP_ENV", "production")
 
 
