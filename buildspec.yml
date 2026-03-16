@@ -5,7 +5,7 @@ env:
     AWS_DEFAULT_REGION: us-east-1       # change to your region
     AWS_ACCOUNT_ID: "851725206270"           # change to your AWS account ID
     ECR_REPO_NAME: ci-cd-poc           # change to your ECR repo name
-    CONTAINER_NAME: hello-world-container    # must match name in ECS Task Definition
+    CONTAINER_NAME: ci-cd-poc-container    # must match name in ECS Task Definition
 
 phases:
   pre_build:
