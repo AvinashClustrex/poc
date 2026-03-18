@@ -14,7 +14,7 @@ APP_ENV = os.environ.get("APP_ENV", "production")
 def root():
     """Basic hello world endpoint."""
     return {
-        "message": "Hello, World!!",
+        "message": "Hello, World!",
         "env": APP_ENV,
         "commit_sha": GIT_COMMIT_SHA,
         "timestamp": datetime.now(timezone.utc).isoformat(),
