@@ -1,76 +1,61 @@
-# .github/workflows/required-reviewers.yml
-name: Required Specific Reviewers Check
-
+name: Required Reviewers Check
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   pull_request_review:
     types: [submitted, dismissed]
 
+# 👈 THIS IS THE KEY FIX
+permissions:
+  checks: write          # Create status checks
+  pull-requests: read    # Read PR reviews  
+  contents: read         # Read repo contents
+  statuses: write        # Update commit statuses
+
 jobs:
   check-reviewers:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        
-      - name: Check required reviewers approved
-        id: reviewer-check
+      - name: Check Required Reviewers
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REQUIRED_REVIEWERS: ${{ secrets.REQUIRED_REVIEWERS }}  # Comma-separated: alice,bob,charlie
+          REQUIRED_REVIEWERS: ${{ secrets.REQUIRED_REVIEWERS }}
         run: |
           PR_NUMBER="${{ github.event.pull_request.number }}"
-          REPO_OWNER="${{ github.repository_owner }}"
-          REPO_NAME="${{ github.event.repository.name }}"
+          SHA="${{ github.sha }}"
           
-          echo "Checking PR #$PR_NUMBER"
+          echo "PR #$PR_NUMBER - SHA: $SHA"
           
-          if [ -z "$REQUIRED_REVIEWERS" ]; then
-            echo "No required reviewers configured. All good! ✅"
-            echo "status=success" >> $GITHUB_OUTPUT
-            echo "description=No required reviewers configured" >> $GITHUB_OUTPUT
+          if [[ -z "$REQUIRED_REVIEWERS" ]]; then
+            curl -X POST -H "Authorization: token $GITHUB_TOKEN" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${{ github.repository }}/statuses/$SHA" \
+              -d '{"state":"success","context":"Required Reviewers","description":"No reviewers required"}'
             exit 0
           fi
           
-          # Split required reviewers
-          IFS=',' read -ra REQUIRED_ARRAY <<< "$REQUIRED_REVIEWERS"
-          echo "Required reviewers: ${REQUIRED_ARRAY[*]}"
+          # Get reviews
+          REVIEWS=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews")
           
-          # Get APPROVED reviews
-          REVIEWS_RESPONSE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/pulls/$PR_NUMBER/reviews")
+          APPROVED=$(echo "$REVIEWS" | jq -r '.[] | select(.state=="APPROVED") | .user.login' 2>/dev/null | grep -v '^$')
           
-          APPROVED_REVIEWERS=$(echo "$REVIEWS_RESPONSE" | jq -r '.[] | select(.state == "APPROVED") | .user.login' | jq -s .)
-          echo "Approved reviewers: $APPROVED_REVIEWERS"
-          
-          # Check each required reviewer approved
-          MISSING_APPROVALS=()
-          for reviewer in "${REQUIRED_ARRAY[@]}"; do
-            reviewer=$(echo "$reviewer" | tr -d '[:space:]')  # Trim whitespace
-            if [[ ! " ${APPROVED_REVIEWERS[*]} " =~ " ${reviewer} " ]]; then
-              MISSING_APPROVALS+=("$reviewer")
+          MISSING=()
+          for reviewer in $(echo "$REQUIRED_REVIEWERS" | tr ',' '\n' | xargs); do
+            if ! echo "$APPROVED" | grep -q "^$reviewer$"; then
+              MISSING+=("$reviewer")
             fi
           done
           
-          if [ ${#MISSING_APPROVALS[@]} -eq 0 ]; then
-            echo "All required reviewers approved! ✅"
-            echo "status=success" >> $GITHUB_OUTPUT
-            echo "description=All required reviewers approved" >> $GITHUB_OUTPUT
+          if [ ${#MISSING[@]} -eq 0 ]; then
+            STATE="success"
+            DESC="All required reviewers approved"
           else
-            echo "❌ Missing approvals from: ${MISSING_APPROVALS[*]}"
-            echo "status=failure" >> $GITHUB_OUTPUT
-            echo "description=Missing required approvals: ${MISSING_APPROVALS[*]}" >> $GITHUB_OUTPUT
-            exit 1
+            STATE="failure" 
+            DESC="Missing: ${MISSING[*]}"
           fi
-      
-      - name: Update PR status check
-        if: always()
-        uses: Sibz/github-status-action@v1
-        with:
-          authToken: ${{ secrets.GITHUB_TOKEN }}
-          context: 'Required Reviewers'
-          state: ${{ steps.reviewer-check.outputs.status }}
-          description: ${{ steps.reviewer-check.outputs.description }}
-          sha: ${{ github.event.pull_request.head.sha }}
+          
+          curl -X POST -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/$SHA" \
+            -d "{\"state\":\"$STATE\",\"context\":\"Required Reviewers\",\"description\":\"$DESC\"}"
