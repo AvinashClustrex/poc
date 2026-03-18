@@ -5,12 +5,11 @@ on:
   pull_request_review:
     types: [submitted, dismissed]
 
-# 👈 THIS IS THE KEY FIX
 permissions:
-  checks: write          # Create status checks
-  pull-requests: read    # Read PR reviews  
-  contents: read         # Read repo contents
-  statuses: write        # Update commit statuses
+  checks: write
+  pull-requests: read
+  contents: read
+  statuses: write
 
 jobs:
   check-reviewers:
@@ -19,29 +18,42 @@ jobs:
       - name: Check Required Reviewers
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REQUIRED_REVIEWERS: ${{ secrets.REQUIRED_REVIEWERS }}
+          REQUIRED_REVIEWERS: ${{ secrets.REQUIRED_REVIEWERS || '' }}
         run: |
           PR_NUMBER="${{ github.event.pull_request.number }}"
           SHA="${{ github.sha }}"
           
-          echo "PR #$PR_NUMBER - SHA: $SHA"
+          echo "Checking PR #$PR_NUMBER"
           
+          # Set PENDING status first
+          curl -s -X POST \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/$SHA" \
+            -d '{"state":"pending","context":"Required Reviewers","description":"Checking reviewers..."}' > /dev/null
+          
+          # Skip if no reviewers required
           if [[ -z "$REQUIRED_REVIEWERS" ]]; then
-            curl -X POST -H "Authorization: token $GITHUB_TOKEN" \
+            curl -s -X POST \
+              -H "Authorization: token $GITHUB_TOKEN" \
               -H "Accept: application/vnd.github.v3+json" \
               "https://api.github.com/repos/${{ github.repository }}/statuses/$SHA" \
-              -d '{"state":"success","context":"Required Reviewers","description":"No reviewers required"}'
+              -d '{"state":"success","context":"Required Reviewers","description":"No reviewers required"}' > /dev/null
             exit 0
           fi
           
-          # Get reviews
+          # Get APPROVED reviewers
           REVIEWS=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
-            "https://api.github.com/repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews")
+            "https://api.github.com/repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews?per_page=100")
           
-          APPROVED=$(echo "$REVIEWS" | jq -r '.[] | select(.state=="APPROVED") | .user.login' 2>/dev/null | grep -v '^$')
+          APPROVED=$(echo "$REVIEWS" | jq -r '.[]? | select(.state=="APPROVED") | .user.login' 2>/dev/null | sort -u)
           
+          echo "Approved reviewers: $APPROVED"
+          echo "Required reviewers: $REQUIRED_REVIEWERS"
+          
+          # Check each required reviewer
           MISSING=()
-          for reviewer in $(echo "$REQUIRED_REVIEWERS" | tr ',' '\n' | xargs); do
+          for reviewer in $(echo "$REQUIRED_REVIEWERS" | tr ',' '\n' | xargs | tr ' ' '\n' | grep -v '^$'); do
             if ! echo "$APPROVED" | grep -q "^$reviewer$"; then
               MISSING+=("$reviewer")
             fi
@@ -49,13 +61,21 @@ jobs:
           
           if [ ${#MISSING[@]} -eq 0 ]; then
             STATE="success"
-            DESC="All required reviewers approved"
+            DESC="All required reviewers approved ✅"
           else
-            STATE="failure" 
-            DESC="Missing: ${MISSING[*]}"
+            STATE="failure"
+            DESC="Missing approvals: ${MISSING[*]} ❌"
           fi
           
-          curl -X POST -H "Authorization: token $GITHUB_TOKEN" \
+          echo "Setting status: $STATE - $DESC"
+          
+          # Set FINAL status (only valid values)
+          curl -s -X POST \
+            -H "Authorization: token $GITHUB_TOKEN" \
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/${{ github.repository }}/statuses/$SHA" \
-            -d "{\"state\":\"$STATE\",\"context\":\"Required Reviewers\",\"description\":\"$DESC\"}"
+            -d "{\"state\":\"$STATE\",\"context\":\"Required Reviewers\",\"description\":\"$DESC\"}" > /dev/null
+          
+          if [[ "$STATE" == "failure" ]]; then
+            exit 1
+          fi
